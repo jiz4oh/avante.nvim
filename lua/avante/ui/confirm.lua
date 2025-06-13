@@ -46,18 +46,17 @@ function M:open()
 
   local commentfg = Highlights.AVANTE_COMMENT_FG
 
-  -- local keybindings_content = "<C-w>f: focus; c: code; r: resp; i: input"
   local keybindings_line = Line:new({
-    { " <C-w>f ", "visual" },
+    { " " .. Config.mappings.confirm.focus_window .. " ", "visual" },
     { " - focus ", commentfg },
     { "  " },
-    { " c ", "visual" },
+    { " " .. Config.mappings.confirm.code .. " ", "visual" },
     { " - code ", commentfg },
     { "  " },
-    { " r ", "visual" },
+    { " " .. Config.mappings.confirm.resp .. " ", "visual" },
     { " - resp ", commentfg },
     { "  " },
-    { " i ", "visual" },
+    { " " .. Config.mappings.confirm.input .. " ", "visual" },
     { " - input ", commentfg },
     { "  " },
   })
@@ -152,18 +151,22 @@ function M:open()
   end
 
   local function click_button()
-    self:close()
     if focus_index == 1 then
+      self:close()
       callback("yes")
       return
     end
     if focus_index == 2 then
+      self:close()
       Utils.notify("Accept all")
       callback("all")
       return
     end
     local prompt_input = PromptInput:new({
-      submit_callback = function(input) callback("no", input ~= "" and input or nil) end,
+      submit_callback = function(input)
+        self:close()
+        callback("no", input ~= "" and input or nil)
+      end,
       close_on_submit = true,
       win_opts = {
         relative = "win",
@@ -176,7 +179,7 @@ function M:open()
     prompt_input:open()
   end
 
-  vim.keymap.set("n", "c", function()
+  vim.keymap.set("n", Config.mappings.confirm.code, function()
     local sidebar = require("avante").get()
     if not sidebar then return end
     if sidebar.code.winid and vim.api.nvim_win_is_valid(sidebar.code.winid) then
@@ -184,7 +187,7 @@ function M:open()
     end
   end, { buffer = popup.bufnr })
 
-  vim.keymap.set("n", "r", function()
+  vim.keymap.set("n", Config.mappings.confirm.resp, function()
     local sidebar = require("avante").get()
     if not sidebar then return end
     if sidebar.winids.result_container and vim.api.nvim_win_is_valid(sidebar.winids.result_container) then
@@ -192,7 +195,7 @@ function M:open()
     end
   end, { buffer = popup.bufnr })
 
-  vim.keymap.set("n", "i", function()
+  vim.keymap.set("n", Config.mappings.confirm.input, function()
     local sidebar = require("avante").get()
     if not sidebar then return end
     if sidebar.winids.input_container and vim.api.nvim_win_is_valid(sidebar.winids.input_container) then
@@ -340,10 +343,10 @@ function M:window_focus_handler()
 end
 
 function M:bind_window_focus_keymaps()
-  vim.keymap.set({ "n", "i" }, "<C-w>f", function() self:window_focus_handler() end)
+  vim.keymap.set({ "n", "i" }, Config.mappings.confirm.focus_window, function() self:window_focus_handler() end)
 end
 
-function M:unbind_window_focus_keymaps() pcall(vim.keymap.del, { "n", "i" }, "<C-w>f") end
+function M:unbind_window_focus_keymaps() pcall(vim.keymap.del, { "n", "i" }, Config.mappings.confirm.focus_window) end
 
 function M:cancel()
   self.callback("no", "cancel")
