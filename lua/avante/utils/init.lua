@@ -566,17 +566,69 @@ function M.is_type(type_name, v)
 end
 -- luacheck: pop
 
----@param code string
+---@param text string
 ---@return string
-function M.get_indentation(code)
-  if not code then return "" end
-  return code:match("^%s*") or ""
+function M.get_indentation(text)
+  if not text then return "" end
+  return text:match("^%s*") or ""
 end
 
---- remove indentation from code: spaces or tabs
-function M.remove_indentation(code)
-  if not code then return code end
-  return code:gsub("%s*", "")
+function M.trim_space(text)
+  if not text then return text end
+  return text:gsub("%s*", "")
+end
+
+---@param original_lines string[]
+---@param target_lines string[]
+---@param compare_fn fun(line_a: string, line_b: string): boolean
+---@return integer | nil start_line
+---@return integer | nil end_line
+function M.try_find_match(original_lines, target_lines, compare_fn)
+  local start_line, end_line
+  for i = 1, #original_lines - #target_lines + 1 do
+    local match = true
+    for j = 1, #target_lines do
+      if not compare_fn(original_lines[i + j - 1], target_lines[j]) then
+        match = false
+        break
+      end
+    end
+    if match then
+      start_line = i
+      end_line = i + #target_lines - 1
+      break
+    end
+  end
+  return start_line, end_line
+end
+
+---@param original_lines string[]
+---@param target_lines string[]
+---@return integer | nil start_line
+---@return integer | nil end_line
+function M.fuzzy_match(original_lines, target_lines)
+  local start_line, end_line
+  ---exact match
+  start_line, end_line = M.try_find_match(
+    original_lines,
+    target_lines,
+    function(line_a, line_b) return line_a == line_b end
+  )
+  if start_line ~= nil and end_line ~= nil then return start_line, end_line end
+  ---fuzzy match
+  start_line, end_line = M.try_find_match(
+    original_lines,
+    target_lines,
+    function(line_a, line_b) return M.trim(line_a, { suffix = " \t" }) == M.trim(line_b, { suffix = " \t" }) end
+  )
+  if start_line ~= nil and end_line ~= nil then return start_line, end_line end
+  ---trim_space match
+  start_line, end_line = M.try_find_match(
+    original_lines,
+    target_lines,
+    function(line_a, line_b) return M.trim_space(line_a) == M.trim_space(line_b) end
+  )
+  return start_line, end_line
 end
 
 function M.relative_path(absolute)
@@ -1103,6 +1155,9 @@ function M.read_file_from_buf_or_disk(filepath)
     return lines, nil
   end
 
+  local stat = vim.uv.fs_stat(abs_path)
+  if stat and stat.type == "directory" then return {}, "Cannot read a directory as file" .. filepath end
+
   -- Fallback: read file from disk
   local file, open_err = io.open(abs_path, "r")
   if file then
@@ -1238,11 +1293,20 @@ function M.llm_tool_param_fields_to_json_schema(fields)
         properties = properties_,
         required = required_,
       }
+    elseif field.type == "array" and field.items then
+      local properties_ = M.llm_tool_param_fields_to_json_schema({ field.items })
+      local _, obj = next(properties_)
+      properties[field.name] = {
+        type = field.type,
+        description = field.get_description and field.get_description() or field.description,
+        items = obj,
+      }
     else
       properties[field.name] = {
         type = field.type,
         description = field.get_description and field.get_description() or field.description,
       }
+      if field.choices then properties[field.name].enum = field.choices end
     end
     if not field.optional then table.insert(required, field.name) end
   end
@@ -1560,7 +1624,7 @@ function M.message_content_item_to_lines(item, message, messages)
       local hl = "AvanteStateSpinnerToolCalling"
       local ok, llm_tool = pcall(require, "avante.llm_tools." .. item.name)
       if ok then
-        if llm_tool.on_render then return llm_tool.on_render(item.input, message.tool_use_logs) end
+        if llm_tool.on_render then return llm_tool.on_render(item.input, message.tool_use_logs, message.state) end
       end
       local tool_result_message = M.get_tool_result_message(message, messages)
       if tool_result_message then
@@ -1660,6 +1724,54 @@ function M.count_lines(str)
   if str:byte(len) == newline_byte then count = count - 1 end
 
   return count
+end
+
+function M.tbl_override(value, override)
+  override = override or {}
+  if type(override) == "function" then return override(value) or value end
+  return vim.tbl_extend("force", value, override)
+end
+
+---@param history_messages avante.HistoryMessage[]
+---@return AvantePartialLLMToolUse[]
+function M.get_uncalled_tool_uses(history_messages)
+  local partial_tool_use_list = {} ---@type AvantePartialLLMToolUse[]
+  local tool_result_seen = {}
+  for idx = #history_messages, 1, -1 do
+    local message = history_messages[idx]
+    local content = message.message.content
+    if type(content) ~= "table" or #content == 0 then goto continue end
+    local is_break = false
+    for _, item in ipairs(content) do
+      if item.type == "tool_use" then
+        if not tool_result_seen[item.id] then
+          local partial_tool_use = {
+            name = item.name,
+            id = item.id,
+            input = item.input,
+            state = message.state,
+          }
+          table.insert(partial_tool_use_list, 1, partial_tool_use)
+        else
+          is_break = true
+          break
+        end
+      end
+      if item.type == "tool_result" then tool_result_seen[item.tool_use_id] = true end
+    end
+    if is_break then break end
+    ::continue::
+  end
+  return partial_tool_use_list
+end
+
+function M.call_once(func)
+  local called = false
+  return function(...)
+    if called then return end
+    called = true
+    return func(...)
+  end
 end
 
 return M

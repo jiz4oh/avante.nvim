@@ -290,7 +290,6 @@ M._defaults = {
       endpoint = "https://generativelanguage.googleapis.com/v1beta/models",
       model = "gemini-2.0-flash",
       timeout = 30000, -- Timeout in milliseconds
-      use_ReAct_prompt = true,
       extra_request_body = {
         generationConfig = {
           temperature = 0.75,
@@ -426,6 +425,7 @@ M._defaults = {
     auto_focus_on_diff_view = false,
     ---@type boolean | string[] -- true: auto-approve all tools, false: normal prompts, string[]: auto-approve specific tools by name
     auto_approve_tool_permissions = false, -- Default: show permission prompts for all tools
+    auto_check_diagnostics = true,
   },
   history = {
     max_tokens = 4096,
@@ -509,6 +509,12 @@ M._defaults = {
     },
     select_model = "<leader>a?", -- Select model command
     select_history = "<leader>ah", -- Select history command
+    confirm = {
+      focus_window = "<C-w>f",
+      code = "c",
+      resp = "r",
+      input = "i",
+    },
   },
   windows = {
     ---@alias AvantePosition "right" | "left" | "top" | "bottom" | "smart"
@@ -638,7 +644,7 @@ function M.setup(opts)
       opts.providers[k] = v
       Utils.warn(
         string.format(
-          "[DEPRACATED] The configuration of `%s` should be placed in `providers.%s`. For detailed migration instructions, please visit: %s",
+          "[DEPRECATED] The configuration of `%s` should be placed in `providers.%s`. For detailed migration instructions, please visit: %s",
           k,
           k,
           migration_url

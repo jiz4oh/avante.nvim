@@ -16,6 +16,7 @@ M.name = "replace_in_file"
 M.description =
   "Request to replace sections of content in an existing file using SEARCH/REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file."
 
+M.support_streaming = true
 -- function M.enabled() return Config.provider:match("ollama") == nil end
 
 ---@type AvanteLLMToolParam
@@ -113,9 +114,9 @@ function M.func(opts, on_log, on_complete, session_ctx)
 
   local is_streaming = opts.streaming or false
 
+  session_ctx.prev_streaming_diff_timestamp_map = session_ctx.prev_streaming_diff_timestamp_map or {}
   local current_timestamp = os.time()
   if is_streaming then
-    session_ctx.prev_streaming_diff_timestamp_map = session_ctx.prev_streaming_diff_timestamp_map or {}
     local prev_streaming_diff_timestamp = session_ctx.prev_streaming_diff_timestamp_map[opts.tool_use_id]
     if prev_streaming_diff_timestamp ~= nil then
       if current_timestamp - prev_streaming_diff_timestamp < 2 then
@@ -199,21 +200,7 @@ function M.func(opts, on_log, on_complete, session_ctx)
   local function complete_rough_diff_block(rough_diff_block)
     local old_lines = rough_diff_block.old_lines
     local new_lines = rough_diff_block.new_lines
-    local start_line, end_line
-    for i = 1, #original_lines - #old_lines + 1 do
-      local match = true
-      for j = 1, #old_lines do
-        if Utils.remove_indentation(original_lines[i + j - 1]) ~= Utils.remove_indentation(old_lines[j]) then
-          match = false
-          break
-        end
-      end
-      if match then
-        start_line = i
-        end_line = i + #old_lines - 1
-        break
-      end
-    end
+    local start_line, end_line = Utils.fuzzy_match(original_lines, old_lines)
     if start_line == nil or end_line == nil then
       local old_string = table.concat(old_lines, "\n")
       return "Failed to find the old string:\n" .. old_string
@@ -464,8 +451,8 @@ function M.func(opts, on_log, on_complete, session_ctx)
   end
 
   local function register_keybinding_events()
+    local keymap_opts = { buffer = bufnr }
     vim.keymap.set({ "n", "v" }, Config.mappings.diff.ours, function()
-      if vim.api.nvim_get_current_buf() ~= bufnr then return end
       local diff_block, idx = get_current_diff_block()
       if not diff_block then return end
       pcall(vim.api.nvim_buf_del_extmark, bufnr, NAMESPACE, diff_block.delete_extmark_id)
@@ -487,10 +474,9 @@ function M.func(opts, on_log, on_complete, session_ctx)
         vim.api.nvim_win_call(winnr, function() vim.cmd("normal! zz") end)
       end
       has_rejected = true
-    end)
+    end, keymap_opts)
 
     vim.keymap.set({ "n", "v" }, Config.mappings.diff.theirs, function()
-      if vim.api.nvim_get_current_buf() ~= bufnr then return end
       local diff_block, idx = get_current_diff_block()
       if not diff_block then return end
       pcall(vim.api.nvim_buf_del_extmark, bufnr, NAMESPACE, diff_block.incoming_extmark_id)
@@ -504,25 +490,23 @@ function M.func(opts, on_log, on_complete, session_ctx)
         vim.api.nvim_win_set_cursor(winnr, { next_diff_block.new_start_line, 0 })
         vim.api.nvim_win_call(winnr, function() vim.cmd("normal! zz") end)
       end
-    end)
+    end, keymap_opts)
 
     vim.keymap.set({ "n", "v" }, Config.mappings.diff.next, function()
-      if vim.api.nvim_get_current_buf() ~= bufnr then return end
       local diff_block = get_next_diff_block()
       if not diff_block then return end
       local winnr = Utils.get_winid(bufnr)
       vim.api.nvim_win_set_cursor(winnr, { diff_block.new_start_line, 0 })
       vim.api.nvim_win_call(winnr, function() vim.cmd("normal! zz") end)
-    end)
+    end, keymap_opts)
 
     vim.keymap.set({ "n", "v" }, Config.mappings.diff.prev, function()
-      if vim.api.nvim_get_current_buf() ~= bufnr then return end
       local diff_block = get_prev_diff_block()
       if not diff_block then return end
       local winnr = Utils.get_winid(bufnr)
       vim.api.nvim_win_set_cursor(winnr, { diff_block.new_start_line, 0 })
       vim.api.nvim_win_call(winnr, function() vim.cmd("normal! zz") end)
-    end)
+    end, keymap_opts)
   end
 
   local function unregister_keybinding_events()
